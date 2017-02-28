@@ -21,10 +21,11 @@ function check_env_var() {
     fi
 }
 
-check_env_var AWS_ACCESS_KEY_ID
-check_env_var AWS_SECRET_ACCESS_KEY
-check_env_var AWS_SUBNET_ID
-check_env_var AWS_SECURITY_GROUP_ID
+#not required when running locally in VirtualBox?
+#check_env_var AWS_ACCESS_KEY_ID
+#check_env_var AWS_SECRET_ACCESS_KEY
+#check_env_var AWS_SUBNET_ID
+#check_env_var AWS_SECURITY_GROUP_ID
 
 which vagrant > /dev/null
 if [ $? != 0 ]; then
@@ -32,6 +33,13 @@ if [ $? != 0 ]; then
   exit 1
 fi
 echo "Vagrant installed - good."
+
+which VBoxManage > /dev/null
+if [ $? != 0 ]; then
+  echo "Please install VirtualBox from virtualbox.org."
+  exit 1
+fi
+echo "VirtualBox installed - good."
 
 POWERSHELL_INSTALLED=0
 which powershell > /dev/null
@@ -42,29 +50,27 @@ else
   echo "Powershell installed - good."
 fi
 
-check_plugin_installed "vagrant-aws"
-check_plugin_installed "vagrant-aws-winrm"
+#not required when running locally in VirtualBox?
+#check_plugin_installed "vagrant-aws"
+#check_plugin_installed "vagrant-aws-winrm"
 check_plugin_installed "vagrant-dsc"
 check_plugin_installed "vagrant-winrm"
 check_plugin_installed "vagrant-winrm-syncedfolders"
 
 if [ $POWERSHELL_INSTALLED == 0 ]; then
-  if [ -z "$PSSCRIPTANALZYER_PATH" ]; then
-    if [ -e /opt/PowerShell/PSScriptAnalyzer/out/PSScriptAnalyzer ]; then
-      PSSCRIPTANALZYER_PATH = "/opt/PowerShell/PSScriptAnalyzer/out/PSScriptAnalyzer"
-    else
-      echo "Could not find PSScriptAnalyzer. Please set environment variable PSSCRIPTANALZYER_PATH to the folder containing PSScriptAnalyzer.psm1."
-      echo "Skipping PSScriptAnalyzer testing."
-    fi
-  fi
-
-  if [ -n "$PSSCRIPTANALZYER_PATH" ]; then
-    echo "Running PSScriptAnalyzer"
-    powershell -command "Import-Module $PSSCRIPTANALZYER_PATH; \$results = Invoke-ScriptAnalyzer ./OctopusDSC/DSCResources -recurse -exclude @('PSUseShouldProcessForStateChangingFunctions', 'PSAvoidUsingPlainTextForPassword', 'PSAvoidUsingUserNameAndPassWordParams', 'PSAvoidUsingConvertToSecureStringWithPlainText'); write-output \$results; exit \$results.length"
-    if [ $? != 0 ]; then
-      echo "PSScriptAnalyzer found issues."
-      exit 1
-    fi
+  echo "Running PSScriptAnalyzer"
+read -r -d '' SCRIPT << EOM
+Import-Module PSScriptAnalyzer
+\$excludedRules = @('PSUseShouldProcessForStateChangingFunctions', 'PSAvoidUsingPlainTextForPassword', 'PSAvoidUsingUserNameAndPassWordParams', 'PSAvoidUsingConvertToSecureStringWithPlainText')
+\$results = Invoke-ScriptAnalyzer ./OctopusDSC/DSCResources -recurse -exclude \$excludedRules
+write-output \$results
+write-output "PSScriptAnalyzer found \$(\$results.length) issues"
+exit \$results.length
+EOM
+  powershell -command "$SCRIPT"
+  if [ $? != 0 ]; then
+    echo "Aborting as PSScriptAnalyzer found issues."
+    exit 1
   fi
 
   echo "Running Pester Tests"

@@ -56,30 +56,25 @@ check_plugin_installed "vagrant-winrm"
 check_plugin_installed "vagrant-winrm-syncedfolders"
 
 if [ $POWERSHELL_INSTALLED == 0 ]; then
-  if [ -z "$PSSCRIPTANALZYER_PATH" ]; then
-    if [ -e /opt/PowerShell/PSScriptAnalyzer/out/PSScriptAnalyzer ]; then
-      PSSCRIPTANALZYER_PATH="/opt/PowerShell/PSScriptAnalyzer/out/PSScriptAnalyzer"
-    else
-      echo "Could not find PSScriptAnalyzer. Please set environment variable PSSCRIPTANALZYER_PATH to the folder containing PSScriptAnalyzer.psm1."
-      echo "Skipping PSScriptAnalyzer testing."
-    fi
-  fi
-
-  if [ -n "$PSSCRIPTANALZYER_PATH" ]; then
-    echo "Running PSScriptAnalyzer"
-    powershell -command "Import-Module $PSSCRIPTANALZYER_PATH; \$results = Invoke-ScriptAnalyzer ./OctopusDSC/DSCResources -recurse -exclude @('PSUseShouldProcessForStateChangingFunctions', 'PSAvoidUsingPlainTextForPassword', 'PSAvoidUsingUserNameAndPassWordParams', 'PSAvoidUsingConvertToSecureStringWithPlainText'); write-output \$results; exit \$results.length"
-    if [ $? != 0 ]; then
-      echo "PSScriptAnalyzer found issues."
-      echo "##teamcity[buildStatus text='{build.status.text}. PSScriptAnalyzer found errors.']"
-      exit 1
-    fi
+  echo "Running PSScriptAnalyzer"
+read -r -d '' SCRIPT << EOM
+Import-Module PSScriptAnalyzer
+\$excludedRules = @('PSUseShouldProcessForStateChangingFunctions', 'PSAvoidUsingPlainTextForPassword', 'PSAvoidUsingUserNameAndPassWordParams', 'PSAvoidUsingConvertToSecureStringWithPlainText')
+\$results = Invoke-ScriptAnalyzer ./OctopusDSC/DSCResources -recurse -exclude \$excludedRules
+write-output \$results
+write-output "PSScriptAnalyzer found \$(\$results.length) issues"
+exit \$results.length
+EOM
+  powershell -command "$SCRIPT"
+  if [ $? != 0 ]; then
+    echo "Aborting as PSScriptAnalyzer found issues."
+    exit 1
   fi
 
   echo "Running Pester Tests"
   powershell -command "Invoke-Pester -OutputFile PesterTestResults.xml -OutputFormat NUnitXml -EnableExit"
   if [ $? != 0 ]; then
     echo "Pester tests failed."
-    echo "##teamcity[buildStatus text='{build.status.text}. Pester tests failed.']"
     exit 1
   fi
 fi
@@ -102,25 +97,10 @@ time vagrant up --provider aws # --debug &> vagrant.log
 VAGRANT_UP_EXIT_CODE=$?
 echo "'vagrant up' exited with exit code $VAGRANT_UP_EXIT_CODE"
 
-echo "Running 'vagrant destroy -f'"
-vagrant destroy -f
-VAGRANT_DESTROY_EXIT_CODE=$?
-echo "'vagrant destroy' exited with exit code $VAGRANT_DESTROY_EXIT_CODE"
-
-echo "Removing local key-pair"
-rm -f $KEY_NAME.pem
-
-echo "Deleting aws key-pair"
-aws ec2 delete-key-pair --key-name $KEY_NAME --region ap-southeast-2
-
 if [ $VAGRANT_UP_EXIT_CODE != 0 ]; then
   echo "Vagrant up failed with exit code $VAGRANT_UP_EXIT_CODE"
   echo "##teamcity[buildStatus text='{build.status.text}. Vagrant failed.']"
   exit $VAGRANT_UP_EXIT_CODE
 fi
 
-if [ $VAGRANT_DESTROY_EXIT_CODE != 0 ]; then
-  echo "Vagrant destroy failed with exit code $VAGRANT_DESTROY_EXIT_CODE"
-  echo "##teamcity[buildStatus text='{build.status.text}. Vagrant cleanup failed. Action required!']"
-  exit $VAGRANT_DESTROY_EXIT_CODE
-fi
+echo "Dont forget to run 'cleanup-aws.sh' when you have finished"
